@@ -1,0 +1,8 @@
+{
+  "name": "loica-extension-ai-proofreader",
+  "version": "0.1.0",
+  "description": "On-demand AI proofreading of selected text in Loica via a local/remote LLM (Ollama). Review-and-replace; read-only until accepted.",
+  "type": "module",
+  "main": "index.ts",
+  "engines": { "loica": "1" }
+}
