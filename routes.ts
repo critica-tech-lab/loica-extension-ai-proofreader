@@ -1,11 +1,10 @@
 import { route, type RouteConfigEntry } from "@react-router/dev/routes";
 
-// Discovered by the glob in `app/extensions/routes.ts`. Points at a shim under
-// `app/routes/` (not directly at `proofread.ts`) because this extension is
-// symlinked in from an out-of-root repo: React Router only runs its
-// server/client split on route modules physically under `app/`. The shim
-// (`app/routes/api.proofread.$id.ts`, source in `route-shim.ts`) re-exports the
-// action, keeping server-only imports off the client bundle.
+// Discovered by the glob in `app/extensions/routes.ts`. Installed as a git
+// submodule (see README), so this file is physically under `app/` like any
+// other extension — the route points straight at `proofread.ts`, no shim. React
+// Router runs its server/client split on it directly, keeping server-only
+// imports off the client bundle.
 export default [
-  route("api/proofread/:id", "routes/api.proofread.$id.ts"),
+  route("api/proofread/:id", "extensions/ai-proofreader/proofread.ts"),
 ] satisfies RouteConfigEntry[];
