@@ -387,6 +387,16 @@ function hideChip() {
   }
 }
 
+/**
+ * The share token for a publicly-viewed document, read off `/s/:token`. Members
+ * viewing a document normally are on a different path and get `null` — they are
+ * authorised by session instead.
+ */
+function shareTokenFromLocation(): string | null {
+  const m = window.location.pathname.match(/^\/s\/([^/?#]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
 /** Fetch (or cache) the LLM edit for a selection. Cache keyed by exact text. */
 async function getImproved(opts: ProofreadPluginOptions, selText: string): Promise<string> {
   const cached = proofreadCache.get(selText);
@@ -394,7 +404,11 @@ async function getImproved(opts: ProofreadPluginOptions, selText: string): Promi
   const res = await fetch(`/api/proofread/${opts.docId}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: selText, language: opts.language }),
+    body: JSON.stringify({
+      text: selText,
+      language: opts.language,
+      shareToken: shareTokenFromLocation() || undefined,
+    }),
   });
   const data = (await res.json()) as { improved?: string; error?: string };
   if (!res.ok || data.error) throw new Error(data.error || `Request failed (${res.status})`);
