@@ -210,7 +210,7 @@ function changesToDecorations(doc: PMNode, segs: Seg[], changes: Change[]): Deco
             class: "ai-proofread-issue",
             style: `text-decoration: underline; text-decoration-color: ${color}; text-decoration-thickness: 1.5px; text-underline-offset: 2px; cursor: pointer;`,
           },
-          { aiEdit: { wrong: c.wrong, fix: c.fix, why: c.why, type: c.type }, aiFrom: from, aiTo: to },
+          { aiEdit: { wrong: c.wrong, fix: c.fix, why: c.why, type: c.type } },
         ),
       );
     } catch {
@@ -554,9 +554,13 @@ export function proofreadPlugin(opts: ProofreadPluginOptions): Plugin {
           if (!set) return false;
           const hit = set.find(pos, pos)[0];
           if (!hit) return false;
-          const spec = hit.spec as { aiEdit?: Edit; aiFrom?: number; aiTo?: number };
+          const spec = hit.spec as { aiEdit?: Edit };
           if (!spec.aiEdit) return false;
-          openPopover(view, spec.aiEdit, spec.aiFrom!, spec.aiTo!, event.clientX, event.clientY);
+          // Use the decoration's LIVE (mapped) bounds, not the positions frozen
+          // in the spec at creation time — otherwise doc edits between check and
+          // apply leave the range stale, so the fix is inserted without deleting
+          // the wrong span (they overlap).
+          openPopover(view, spec.aiEdit, hit.from, hit.to, event.clientX, event.clientY);
           return true;
         } catch {
           return false;
