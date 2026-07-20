@@ -24,6 +24,9 @@ import type { Node as PMNode } from "prosemirror-model";
 export const proofreadPluginKey = new PluginKey<DecorationSet>("ai-proofread");
 
 const MIN_CHARS = 12;
+// Keep in sync with MAX_CHARS in proofread.ts — checked here too so an oversized
+// selection fails instantly with a number instead of after a round trip.
+const MAX_CHARS = 3000;
 
 // Cache LLM rewrites by exact selection text so re-checking an unchanged passage
 // is instant (no call). Capped, module-level (shared for the page's lifetime).
@@ -361,14 +364,35 @@ function pendingDecos(doc: PMNode, from: number, to: number): DecorationSet {
   }
 }
 
+// This route does not stream — the caller waits the full run with nothing to
+// read — so the wait has to be legible or it reads as a hang. Measured
+// throughput for the default 12B on Apple silicon is ~48 source chars/second,
+// plus a couple of seconds of warm-up. A different model shifts this, so it is
+// a hint, never a promise.
+function etaSeconds(chars: number): number {
+  return Math.max(5, Math.round((chars / 48 + 2) / 5) * 5);
+}
+
 let chipEl: HTMLElement | null = null;
-function showChip(view: EditorView, at: number) {
+let chipTicker: ReturnType<typeof setInterval> | undefined;
+function showChip(view: EditorView, at: number, chars = 0) {
   hideChip();
   const el = document.createElement("div");
   el.className = "ai-proofread-chip";
   const spin = document.createElement("span");
   spin.className = "ai-proofread-spinner";
-  el.append(spin, document.createTextNode("Checking…"));
+  const label = document.createTextNode("Checking…");
+  el.append(spin, label);
+
+  if (chars > 0) {
+    const eta = etaSeconds(chars);
+    const startedAt = Date.now();
+    label.textContent = `Checking… ~${eta}s`;
+    chipTicker = setInterval(() => {
+      const elapsed = Math.round((Date.now() - startedAt) / 1000);
+      label.textContent = `Checking… ${elapsed}s of ~${eta}s`;
+    }, 1000);
+  }
   try {
     const c = view.coordsAtPos(at);
     el.style.left = `${Math.min(c.left, window.innerWidth - 130)}px`;
@@ -381,6 +405,10 @@ function showChip(view: EditorView, at: number) {
   chipEl = el;
 }
 function hideChip() {
+  if (chipTicker !== undefined) {
+    clearInterval(chipTicker);
+    chipTicker = undefined;
+  }
   if (chipEl) {
     chipEl.remove();
     chipEl = null;
@@ -428,6 +456,14 @@ function currentSelection(
   }
   const { text, segs } = selectionToText(view.state.doc, s.from, s.to);
   if (!text.trim()) return null;
+  if (text.length > MAX_CHARS) {
+    flash(
+      view,
+      `Selection is ${text.length.toLocaleString()} characters — check up to ` +
+        `${MAX_CHARS.toLocaleString()} at a time (about a minute).`,
+    );
+    return null;
+  }
   return { from: s.from, to: s.to, text, segs };
 }
 
@@ -456,7 +492,7 @@ export async function runProofreadCheck(view: EditorView, opts: ProofreadPluginO
       window.getSelection()?.removeAllRanges();
     } catch { /* ignore */ }
   }
-  showChip(view, sel.to);
+  showChip(view, sel.to, sel.text.length);
 
   try {
     const improved = await getImproved(opts, sel.text);

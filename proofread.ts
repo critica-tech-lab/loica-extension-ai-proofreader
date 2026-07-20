@@ -73,6 +73,13 @@ async function authorizeDoc(
   throw new Response("Not found", { status: 404 });
 }
 
+// Ceiling on a single selection. Not a model limit — a patience limit: the
+// default 12B model sustains ~48 source characters/second on Apple silicon, so
+// 3,000 chars is a little over a minute. The old 8,000 took ~3 minutes, and
+// unlike the translation route this one does not stream: the caller stares at a
+// spinner for the whole run with nothing to read.
+const MAX_CHARS = 3000;
+
 // `language` is interpolated into the *system* prompt, so a free-form value lets
 // a caller rewrite the model's instructions and use this route as a
 // general-purpose LLM. The stock client never sets it (see `proofreadPlugin`),
@@ -240,9 +247,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (!text || !text.trim()) {
     return Response.json({ error: "No text to check." }, { status: 400 });
   }
-  if (text.length > 8000) {
+  if (text.length > MAX_CHARS) {
     return Response.json(
-      { error: "Selection too long — check a paragraph or two at a time." },
+      {
+        error:
+          `Selection is ${text.length.toLocaleString()} characters — the limit is ` +
+          `${MAX_CHARS.toLocaleString()}. Check a few paragraphs at a time.`,
+      },
       { status: 413 },
     );
   }
