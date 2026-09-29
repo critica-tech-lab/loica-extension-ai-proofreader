@@ -9,11 +9,14 @@
  * (verified — each model misses a different subset). Diffing a full rewrite
  * recovers every change with exact positions, model-independently.
  *
- * Body: { text: string, language?: string }
- * Returns: { improved: string, model: string }
+ * Body: { text: string, language?: string, mode?: "fix" | "improve" }
+ *   mode  "fix" (default) corrects objective errors only; "improve" also
+ *         tightens phrasing. See `prompts.ts`.
+ * Returns: { improved: string, model: string, mode: string }
  *
  * Config: OLLAMA_URL (default http://localhost:11434),
- *         OLLAMA_PROOFREAD_MODEL (default gemma3:12b).
+ *         OLLAMA_PROOFREAD_MODEL (default gemma3:12b),
+ *         OLLAMA_IMPROVE_MODEL (default: OLLAMA_PROOFREAD_MODEL).
  */
 import type { ActionFunctionArgs } from "react-router";
 import { getSessionUser } from "~/lib/auth.server";
@@ -22,6 +25,7 @@ import { getMembership } from "~/lib/workspace.server";
 import { hasSharedAccess } from "~/lib/sharing.server";
 import { createGate, GateBusyError } from "./gate";
 import { matchQuotes } from "./quotes";
+import { parseMode, promptFor, modelFor, type Mode } from "./prompts";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_ACTIVE = 2;
@@ -163,28 +167,15 @@ function assertSafeUrl(base: string): void {
   );
 }
 
-// A precise IN-PLACE line editor: it fixes errors AND tightens wordy/redundant/
-// weak phrases, but keeps the sentence structure and length, so a word-diff of
-// the result yields discrete, phrase-level underlines rather than one big blob.
-const SYSTEM_PROMPT =
-  "You are a precise line editor. Improve the user's text with IN-PLACE edits: " +
-  "fix errors (spelling, accents, grammar, agreement, punctuation) AND replace " +
-  "wordy, redundant or weak phrases with tighter, stronger equivalents. STRICT " +
-  "RULES: edit in place — keep the SAME sentences, the same order and roughly " +
-  "the same length; do NOT merge, split, reorder or delete whole sentences; do " +
-  "NOT summarise or compress the whole passage; change only the specific words " +
-  "or phrases that need improving and leave the rest verbatim. Preserve the " +
-  "meaning and the SAME language; keep Markdown, names, numbers, URLs and code " +
-  "unchanged. Output ONLY the edited text — no preamble, no explanation, no " +
-  "surrounding quotes.";
-
 async function proofread(
   text: string,
   language: string | undefined,
+  mode: Mode,
 ): Promise<{ improved: string; model: string }> {
   const base = (process.env.OLLAMA_URL || "http://localhost:11434").replace(/\/$/, "");
   assertSafeUrl(base);
-  const model = process.env.OLLAMA_PROOFREAD_MODEL || "gemma3:12b";
+  const model = modelFor(mode, process.env);
+  const prompt = promptFor(mode);
   const langLine = language
     ? `The text is in ${language}; reply in ${language}.`
     : "Reply in the same language as the text.";
@@ -213,28 +204,11 @@ async function proofread(
         keep_alive: process.env.OLLAMA_KEEP_ALIVE || "30m",
         options: { temperature: 0.15, num_ctx: numCtx },
         messages: [
-          { role: "system", content: `${SYSTEM_PROMPT} ${langLine}` },
-          // Few-shot: demonstrate the KIND of in-place edits wanted (cut filler,
-          // tighten wordy phrases, fix errors) in both languages, so the model
-          // does more than spellcheck yet keeps sentence structure.
-          {
-            role: "user",
-            content:
-              "En el día de hoy quiero comentar que basicamente la situacion que estamos viviendo nos afecta a todos nosotros de forma bastante negativa.",
-          },
-          {
-            role: "assistant",
-            content: "Hoy quiero comentar que la situación que vivimos nos afecta a todos muy negativamente.",
-          },
-          {
-            role: "user",
-            content:
-              "In todays meeting we basically came to the conclusion that we should try to make an effort in order to improve the situation.",
-          },
-          {
-            role: "assistant",
-            content: "In today's meeting we concluded that we should make an effort to improve the situation.",
-          },
+          { role: "system", content: `${prompt.system} ${langLine}` },
+          ...prompt.shots.flatMap(([user, assistant]) => [
+            { role: "user", content: user },
+            { role: "assistant", content: assistant },
+          ]),
           { role: "user", content: text },
         ],
       }),
@@ -268,11 +242,13 @@ async function proofread(
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
-  const { text, language, shareToken } = (await request.json()) as {
+  const { text, language, shareToken, mode: rawMode } = (await request.json()) as {
     text?: string;
     language?: string;
     shareToken?: string;
+    mode?: string;
   };
+  const mode = parseMode(rawMode);
 
   // The share token travels in the body, so parse before authorizing.
   const { rateKey } = await authorizeDoc(request, params, shareToken);
@@ -299,8 +275,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   try {
-    const { improved, model } = await gate.run(() => proofread(text, canonicalLang(language)));
-    return Response.json({ improved, model });
+    const { improved, model } = await gate.run(() => proofread(text, canonicalLang(language), mode));
+    return Response.json({ improved, model, mode });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Proofread failed.";
     if (err instanceof GateBusyError) {

@@ -25,13 +25,19 @@ const aiProofreaderExtension: LoicaExtension = {
   editorPlugins: (ctx: ExtensionEditorPluginContext) => [
     proofreadPlugin({ docId: ctx.docId }),
   ],
-  // Trigger lives in loica's native text-selection menu (not a floating button):
+  // Triggers live in loica's native text-selection menu (not a floating button):
   // an in-place line edit rendered as discrete inline underlines.
+  // "Check" only corrects errors; "Improve" also tightens phrasing (rewrites).
   selectionMenuItems: (ctx: ExtensionEditorPluginContext) => [
     {
       label: "Check",
-      title: "Check spelling, grammar and phrasing",
-      run: (view) => runProofreadCheck(view as EditorView, { docId: ctx.docId }),
+      title: "Fix spelling and grammar errors only",
+      run: (view) => runProofreadCheck(view as EditorView, { docId: ctx.docId, mode: "fix" }),
+    },
+    {
+      label: "Improve",
+      title: "Fix errors and tighten wordy phrasing",
+      run: (view) => runProofreadCheck(view as EditorView, { docId: ctx.docId, mode: "improve" }),
     },
   ],
 };

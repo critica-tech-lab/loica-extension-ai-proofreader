@@ -20,6 +20,7 @@ import type { EditorState, Transaction } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
 import type { EditorView } from "prosemirror-view";
 import type { Node as PMNode } from "prosemirror-model";
+import type { Mode } from "./prompts";
 
 export const proofreadPluginKey = new PluginKey<DecorationSet>("ai-proofread");
 
@@ -440,9 +441,11 @@ function shareTokenFromLocation(): string | null {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
-/** Fetch (or cache) the LLM edit for a selection. Cache keyed by exact text. */
+/** Fetch (or cache) the LLM edit for a selection. Cache keyed by mode + exact text. */
 async function getImproved(opts: ProofreadPluginOptions, selText: string): Promise<string> {
-  const cached = proofreadCache.get(selText);
+  const mode = opts.mode ?? "fix";
+  const cacheKey = `${mode}\n${selText}`;
+  const cached = proofreadCache.get(cacheKey);
   if (cached !== undefined) return cached;
   // Backstop for a dead connection: the server answers within its own timeout.
   const res = await fetch(`/api/proofread/${opts.docId}`, {
@@ -452,6 +455,7 @@ async function getImproved(opts: ProofreadPluginOptions, selText: string): Promi
     body: JSON.stringify({
       text: selText,
       language: opts.language,
+      mode,
       shareToken: shareTokenFromLocation() || undefined,
     }),
   }).catch((err: unknown) => {
@@ -463,7 +467,7 @@ async function getImproved(opts: ProofreadPluginOptions, selText: string): Promi
   const data = (await res.json()) as { improved?: string; error?: string };
   if (!res.ok || data.error) throw new Error(data.error || `Request failed (${res.status})`);
   const improved = data.improved || selText;
-  cacheSet(selText, improved);
+  cacheSet(cacheKey, improved);
   return improved;
 }
 
@@ -536,6 +540,8 @@ export async function runProofreadCheck(view: EditorView, opts: ProofreadPluginO
 export interface ProofreadPluginOptions {
   docId: string;
   language?: string;
+  /** "fix" (default) corrects errors only; "improve" also tightens phrasing. */
+  mode?: Mode;
 }
 
 export function proofreadPlugin(opts: ProofreadPluginOptions): Plugin {

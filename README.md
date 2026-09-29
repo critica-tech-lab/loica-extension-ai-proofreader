@@ -1,9 +1,15 @@
 # loica-extension-ai-proofreader
 
 An **on-demand AI proofreader** for Loica. To the user it's just a spell/grammar
-checker — no "AI" branding. Select a passage → **Check** (in Loica's native
-text-selection menu) → the fixes appear as **inline underlines**; click one to
-apply. It fixes errors AND tightens wordy/redundant/weak phrasing, in place.
+checker — no "AI" branding. Select a passage → **Check** or **Improve** (in
+Loica's native text-selection menu) → the fixes appear as **inline underlines**;
+click one to apply.
+
+- **Check** fixes objective errors only (spelling, accents, grammar, agreement,
+  punctuation) and leaves correct words alone.
+- **Improve** also tightens wordy/redundant/weak phrasing, in place. It rewrites
+  text, so it is a separate action: on a benchmark of correct sentences it
+  changed 42 to 51% of them, against 0 to 2% for Check.
 
 **Read-until-accepted** — the document only changes when you click a suggestion.
 
@@ -14,7 +20,7 @@ lever for Spanish.
 
 ## How it works
 
-1. **Trigger** — "Check" in the selection menu runs on the selection (never on
+1. **Trigger** — "Check" or "Improve" in the selection menu runs on the selection (never on
    keystroke; the LLM is too slow/expensive for that).
 2. **Pending state** — the selection collapses and the passage gets a pulsing
    highlight + a spinner chip for the whole request, so the user sees which
@@ -49,7 +55,8 @@ Uses only generic extension seams — core names no extension:
 | Var | Default | Meaning |
 |-----|---------|---------|
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama base URL |
-| `OLLAMA_PROOFREAD_MODEL` | `gemma3:12b` | model tag |
+| `OLLAMA_PROOFREAD_MODEL` | `gemma3:12b` | model tag (Check and Improve) |
+| `OLLAMA_IMPROVE_MODEL` | same as above | model tag for Improve only |
 | `OLLAMA_KEEP_ALIVE` | `30m` | how long Ollama keeps the model resident |
 | `OLLAMA_TIMEOUT_MS` | `120000` | give up on a request after this long (Ollama queues with no timeout) |
 | `OLLAMA_MAX_CONCURRENT` | `2` | Loica requests sent to Ollama at once |
