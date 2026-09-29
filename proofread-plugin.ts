@@ -27,6 +27,8 @@ const MIN_CHARS = 12;
 // Keep in sync with MAX_CHARS in proofread.ts — checked here too so an oversized
 // selection fails instantly with a number instead of after a round trip.
 const MAX_CHARS = 3000;
+// Server timeout is 120s (OLLAMA_TIMEOUT_MS); leave slack so its error arrives first.
+const CLIENT_TIMEOUT_MS = 150_000;
 
 // Cache LLM rewrites by exact selection text so re-checking an unchanged passage
 // is instant (no call). Capped, module-level (shared for the page's lifetime).
@@ -442,14 +444,21 @@ function shareTokenFromLocation(): string | null {
 async function getImproved(opts: ProofreadPluginOptions, selText: string): Promise<string> {
   const cached = proofreadCache.get(selText);
   if (cached !== undefined) return cached;
+  // Backstop for a dead connection: the server answers within its own timeout.
   const res = await fetch(`/api/proofread/${opts.docId}`, {
     method: "POST",
+    signal: AbortSignal.timeout(CLIENT_TIMEOUT_MS),
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       text: selText,
       language: opts.language,
       shareToken: shareTokenFromLocation() || undefined,
     }),
+  }).catch((err: unknown) => {
+    if (err instanceof Error && err.name === "TimeoutError") {
+      throw new Error("The AI server did not answer. Try again in a minute.");
+    }
+    throw err;
   });
   const data = (await res.json()) as { improved?: string; error?: string };
   if (!res.ok || data.error) throw new Error(data.error || `Request failed (${res.status})`);

@@ -20,6 +20,29 @@ import { getSessionUser } from "~/lib/auth.server";
 import { getDocument, getDocumentByToken } from "~/lib/document.server";
 import { getMembership } from "~/lib/workspace.server";
 import { hasSharedAccess } from "~/lib/sharing.server";
+import { createGate, GateBusyError } from "./gate";
+import { matchQuotes } from "./quotes";
+
+const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_MAX_ACTIVE = 2;
+const DEFAULT_MAX_QUEUED = 4;
+const HTTP_BAD_GATEWAY = 502;
+const HTTP_UNAVAILABLE = 503;
+const HTTP_GATEWAY_TIMEOUT = 504;
+
+// Caps Loica's own load on the LLM server: extra requests fail fast with a
+// "busy" error instead of queueing behind other Ollama clients with no limit.
+const gate = createGate({
+  maxActive: Number(process.env.OLLAMA_MAX_CONCURRENT) || DEFAULT_MAX_ACTIVE,
+  maxQueued: Number(process.env.OLLAMA_MAX_QUEUE) || DEFAULT_MAX_QUEUED,
+});
+
+/** Thrown when the LLM server accepts the request but does not answer in time. */
+class LlmTimeoutError extends Error {
+  constructor() {
+    super("The AI server took too long to answer. It may be busy; try again in a minute.");
+  }
+}
 
 function parseCookies(header: string): Record<string, string> {
   return Object.fromEntries(
@@ -173,10 +196,14 @@ async function proofread(
   const estTokens = Math.ceil(text.length / 4);
   const numCtx = Math.min(8192, Math.max(2048, estTokens * 2 + 800));
 
+  const timeoutMs = Number(process.env.OLLAMA_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS;
+
   let res: Response;
   try {
     res = await fetch(`${base}/api/chat`, {
       method: "POST",
+      // Ollama queues requests with no timeout when every slot is taken.
+      signal: AbortSignal.timeout(timeoutMs),
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model,
@@ -213,6 +240,9 @@ async function proofread(
       }),
     });
   } catch (err) {
+    if (err instanceof Error && err.name === "TimeoutError") {
+      throw new LlmTimeoutError();
+    }
     throw new Error(
       `Could not reach the LLM at ${base}. Is Ollama running? (${err instanceof Error ? err.message : String(err)})`,
     );
@@ -221,8 +251,18 @@ async function proofread(
     const detail = await res.text().catch(() => "");
     throw new Error(`LLM returned ${res.status}: ${detail.slice(0, 300)}`);
   }
-  const data = (await res.json()) as { message?: { content?: string } };
-  const improved = (data.message?.content ?? "").trim();
+
+  // The abort signal also covers reading the body, so a stall here times out too.
+  let data: { message?: { content?: string } };
+  try {
+    data = (await res.json()) as { message?: { content?: string } };
+  } catch (err) {
+    if (err instanceof Error && err.name === "TimeoutError") {
+      throw new LlmTimeoutError();
+    }
+    throw err;
+  }
+  const improved = matchQuotes(text, (data.message?.content ?? "").trim());
   if (!improved) throw new Error("The model returned an empty result.");
   return { improved, model };
 }
@@ -259,12 +299,16 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   try {
-    const { improved, model } = await proofread(text, canonicalLang(language));
+    const { improved, model } = await gate.run(() => proofread(text, canonicalLang(language)));
     return Response.json({ improved, model });
   } catch (err) {
-    return Response.json(
-      { error: err instanceof Error ? err.message : "Proofread failed." },
-      { status: 502 },
-    );
+    const message = err instanceof Error ? err.message : "Proofread failed.";
+    if (err instanceof GateBusyError) {
+      return Response.json({ error: message }, { status: HTTP_UNAVAILABLE });
+    }
+    if (err instanceof LlmTimeoutError) {
+      return Response.json({ error: message }, { status: HTTP_GATEWAY_TIMEOUT });
+    }
+    return Response.json({ error: message }, { status: HTTP_BAD_GATEWAY });
   }
 }

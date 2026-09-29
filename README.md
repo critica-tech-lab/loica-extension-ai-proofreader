@@ -51,6 +51,12 @@ Uses only generic extension seams — core names no extension:
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama base URL |
 | `OLLAMA_PROOFREAD_MODEL` | `gemma3:12b` | model tag |
 | `OLLAMA_KEEP_ALIVE` | `30m` | how long Ollama keeps the model resident |
+| `OLLAMA_TIMEOUT_MS` | `120000` | give up on a request after this long (Ollama queues with no timeout) |
+| `OLLAMA_MAX_CONCURRENT` | `2` | Loica requests sent to Ollama at once |
+| `OLLAMA_MAX_QUEUE` | `4` | Loica requests allowed to wait; more fail at once with 503 "AI server is busy" |
+
+Quotes: the route restores straight quotes when the original had none. Gemma
+rewrites `It's` as `It’s`, which the client diff would underline as a fix.
 
 `gemma3:12b` is the default: best Spanish faithfulness (fixes real errors +
 tightens phrasing without drifting), ~5–6s/paragraph warm on an M4. `qwen2.5:7b`
@@ -98,6 +104,30 @@ a load balancer — and each keeps its own counter, so the effective limit becom
 and nothing else in this extension touches the host database, which is what
 keeps loica core agnostic of it. If you scale out and the limit matters, move
 the counter to a store both processes can see before you do.
+
+## Isolating the LLM from other Ollama clients
+
+Ollama serves `OLLAMA_NUM_PARALLEL` requests at once (2 by default) and holds
+the rest in a queue with no timeout. If other apps share the instance, one
+runaway generation can hold a slot indefinitely: a stuck 35,000-token
+completion once left every Loica check spinning. `OLLAMA_TIMEOUT_MS` and the
+gate above make Loica fail fast, but only a dedicated instance keeps other
+clients out of its slots.
+
+Run a second Ollama on its own port, sharing the model files:
+
+```bash
+OLLAMA_HOST=127.0.0.1:11435 \
+OLLAMA_NUM_PARALLEL=2 \
+OLLAMA_MAX_QUEUE=8 \
+OLLAMA_KEEP_ALIVE=30m \
+OLLAMA_FLASH_ATTENTION=1 \
+ollama serve
+```
+
+and point Loica at it: `OLLAMA_URL=http://127.0.0.1:11435`. Both instances
+draw on the same GPU memory, so a model resident in each counts twice. On
+macOS wrap the command in a launchd agent; on Linux, a systemd unit.
 
 ## Topology — running the LLM on a separate host
 
