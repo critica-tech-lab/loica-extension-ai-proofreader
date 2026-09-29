@@ -23,6 +23,10 @@ import type { Node as PMNode } from "prosemirror-model";
 import type { Mode } from "./prompts";
 import { detectLang } from "./lang";
 import { createStatsSender } from "./stats-client";
+import { publishStatus, shortMessage } from "./status";
+
+const STATUS_ID = "ai-proofreader";
+const ERROR_TTL_MS = 8000;
 
 export const proofreadPluginKey = new PluginKey<DecorationSet>("ai-proofread");
 
@@ -538,6 +542,7 @@ export async function runProofreadCheck(view: EditorView, opts: ProofreadPluginO
     const improved = await getImproved(opts, sel.text);
     const changes = diffToChanges(sel.text, improved);
     const decos = changesToDecorations(view.state.doc, sel.segs, changes, lang);
+    publishStatus({ id: STATUS_ID, text: null }); // a good run clears an earlier error
     view.dispatch(view.state.tr.setMeta(proofreadPluginKey, decos)); // replaces the pulse
     if (changes.length === 0) {
       statsSender?.track("clean", lang);
@@ -548,7 +553,18 @@ export async function runProofreadCheck(view: EditorView, opts: ProofreadPluginO
   } catch (err) {
     statsSender?.track("error", lang);
     view.dispatch(view.state.tr.setMeta(proofreadPluginKey, DecorationSet.empty)); // clear the pulse
-    flash(view, err instanceof Error ? err.message : "Check failed");
+    const message = err instanceof Error ? err.message : "Check failed";
+    // Prefer the footer; fall back to the floating notice when the host has none.
+    const shown = publishStatus({
+      id: STATUS_ID,
+      text: shortMessage(message),
+      title: message,
+      tone: "error",
+      ttlMs: ERROR_TTL_MS,
+    });
+    if (!shown) {
+      flash(view, message);
+    }
   } finally {
     hideChip();
     busyViews.delete(view);
