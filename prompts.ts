@@ -1,8 +1,9 @@
 /**
  * The two things the proofreader can be asked to do.
  *
- *   fix      correct objective errors only (spelling, accents, grammar,
- *            agreement, punctuation) and leave every correct word alone.
+ *   fix      correct grammar errors only (agreement, verb form, prepositions,
+ *            punctuation) and leave every other word alone. Spelling is left
+ *            to LanguageTool.
  *   improve  also tighten wordy or weak phrasing, which rewrites text.
  *
  * They need separate prompts. On a benchmark of clean sentences, the improving
@@ -19,12 +20,17 @@ interface Prompt {
 
 const DEFAULT_MODEL = "gemma3:12b";
 
+// Grammar only: LanguageTool already underlines typos and missing accents as
+// you type, so this pass would only duplicate it.
 const FIX_SYSTEM =
-  "You are a proofreader. Fix ONLY objective errors: spelling, accents, grammar, " +
-  "agreement, capitalization, punctuation. Do NOT change wording, style or tone. " +
-  "If the text has no errors, return it exactly unchanged. Keep Markdown, names, " +
-  "numbers, URLs and code unchanged. Output ONLY the corrected text, no preamble, " +
-  "no explanation, no quotes.";
+  "You are a grammar proofreader. Fix ONLY grammar errors: agreement, verb form " +
+  "and tense, prepositions, articles, pronouns, confused words (their/there, " +
+  "haber/a ver) and punctuation. Do NOT fix spelling or accents: a separate " +
+  "spellchecker does that, so leave every misspelled word exactly as written. " +
+  "Do NOT change wording, style or tone. If the text has no grammar errors, " +
+  "return it exactly unchanged. Keep straight quotes and apostrophes as written. " +
+  "Keep Markdown, names, numbers, URLs and code unchanged. Output ONLY the " +
+  "corrected text, no preamble, no explanation, no quotes.";
 
 // A precise IN-PLACE line editor: it fixes errors AND tightens wordy/redundant/
 // weak phrases, but keeps the sentence structure and length, so a word-diff of
@@ -43,9 +49,10 @@ const IMPROVE_SYSTEM =
 
 // Examples in both languages, including one that must come back untouched.
 const FIX_SHOTS: Array<[string, string]> = [
-  ["Ayer fuimos a la reunion y el equipo aprovo la propuesta.", "Ayer fuimos a la reunión y el equipo aprobó la propuesta."],
+  ["Los resultados del estudio muestra que la mayoria esta de acuerdo.", "Los resultados del estudio muestran que la mayoria esta de acuerdo."],
   ["We discussed the plan and it's timeline yesterday.", "We discussed the plan and its timeline yesterday."],
-  ["The report is ready for review.", "The report is ready for review."],
+  ["The docuemnt is ready for review.", "The docuemnt is ready for review."],
+  ["Necesito una solución rápida para este problema.", "Necesito una solución rápida para este problema."],
 ];
 
 // Few-shot: demonstrate the KIND of in-place edits wanted (cut filler, tighten

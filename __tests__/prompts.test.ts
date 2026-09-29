@@ -22,6 +22,14 @@ describe("promptFor", () => {
     expect(system).not.toContain("tighter");
   });
 
+  test("fix leaves spelling to the spellchecker", () => {
+    const { system, shots } = promptFor("fix");
+    expect(system).toContain("Do NOT fix spelling or accents");
+    expect(system).not.toContain("Fix ONLY objective errors: spelling");
+    // An example whose only error is a typo must come back with the typo kept.
+    expect(shots.some(([input, output]) => input === output && input.includes("docuemnt"))).toBe(true);
+  });
+
   test("improve keeps the tightening instruction", () => {
     expect(promptFor("improve").system).toContain("tighter");
   });

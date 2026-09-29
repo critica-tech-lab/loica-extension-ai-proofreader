@@ -5,8 +5,10 @@ checker — no "AI" branding. Select a passage → **Check** or **Improve** (in
 Loica's native text-selection menu) → the fixes appear as **inline underlines**;
 click one to apply.
 
-- **Check** fixes objective errors only (spelling, accents, grammar, agreement,
-  punctuation) and leaves correct words alone.
+- **Check** fixes grammar errors only (agreement, verb form, prepositions,
+  punctuation) and leaves other words alone. It does not touch spelling or
+  accents: the LanguageTool extension underlines those as you type. If you run
+  Check without LanguageTool, typos stay unfixed.
 - **Improve** also tightens wordy/redundant/weak phrasing, in place. It rewrites
   text, so it is a separate action: on a benchmark of correct sentences it
   changed 42 to 51% of them, against 0 to 2% for Check.

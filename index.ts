@@ -31,7 +31,7 @@ const aiProofreaderExtension: LoicaExtension = {
   selectionMenuItems: (ctx: ExtensionEditorPluginContext) => [
     {
       label: "Check",
-      title: "Fix spelling and grammar errors only",
+      title: "Fix grammar errors only (spelling is left to LanguageTool)",
       run: (view) => runProofreadCheck(view as EditorView, { docId: ctx.docId, mode: "fix" }),
     },
     {
