@@ -21,6 +21,8 @@ import { Decoration, DecorationSet } from "prosemirror-view";
 import type { EditorView } from "prosemirror-view";
 import type { Node as PMNode } from "prosemirror-model";
 import type { Mode } from "./prompts";
+import { detectLang } from "./lang";
+import { createStatsSender } from "./stats-client";
 
 export const proofreadPluginKey = new PluginKey<DecorationSet>("ai-proofread");
 
@@ -47,6 +49,8 @@ interface Edit {
   fix: string;
   why: string;
   type: string;
+  /** "en" / "es" of the checked passage, or null; labels the outcome counters. */
+  lang: string | null;
 }
 
 // AI suggestions are ALWAYS violet, so the user can tell them apart at a glance:
@@ -193,7 +197,7 @@ function diffToChanges(selText: string, improved: string): Change[] {
 }
 
 /** Turn located changes into non-overlapping inline decorations. */
-function changesToDecorations(doc: PMNode, segs: Seg[], changes: Change[]): DecorationSet {
+function changesToDecorations(doc: PMNode, segs: Seg[], changes: Change[], lang: string | null): DecorationSet {
   const max = doc.content.size;
   const decos: Decoration[] = [];
   for (const c of changes) {
@@ -213,7 +217,7 @@ function changesToDecorations(doc: PMNode, segs: Seg[], changes: Change[]): Deco
             class: "ai-proofread-issue",
             style: `text-decoration: underline; text-decoration-color: ${color}; text-decoration-thickness: 1.5px; text-underline-offset: 2px; cursor: pointer;`,
           },
-          { aiEdit: { wrong: c.wrong, fix: c.fix, why: c.why, type: c.type } },
+          { aiEdit: { wrong: c.wrong, fix: c.fix, why: c.why, type: c.type, lang } },
         ),
       );
     } catch {
@@ -230,6 +234,9 @@ function changesToDecorations(doc: PMNode, segs: Seg[], changes: Change[]): Deco
 // ── click-to-apply popover ───────────────────────────────────────────────────
 
 let activePopover: HTMLElement | null = null;
+
+// Outcome counters for the open editor; null for anonymous share-link viewers.
+let statsSender: ReturnType<typeof createStatsSender> | null = null;
 
 function closePopover() {
   if (activePopover) {
@@ -294,6 +301,7 @@ function openPopover(view: EditorView, edit: Edit, from: number, to: number, x: 
       const f = Math.max(0, Math.min(from, size));
       const t = Math.max(f, Math.min(to, size));
       view.dispatch(view.state.tr.insertText(edit.fix, f, t));
+      statsSender?.track("accepted", edit.lang);
     } catch { /* ignore */ }
     closePopover();
     view.focus();
@@ -306,7 +314,10 @@ function openPopover(view: EditorView, edit: Edit, from: number, to: number, x: 
     padding: "3px 10px", borderRadius: "999px", border: "1px solid var(--border, #ccc)",
     background: "transparent", color: "var(--fg, #111)", fontSize: "12px", cursor: "pointer",
   } as CSSStyleDeclaration);
-  dismiss.addEventListener("click", () => closePopover());
+  dismiss.addEventListener("click", () => {
+    statsSender?.track("dismissed", edit.lang);
+    closePopover();
+  });
 
   row.append(apply, dismiss);
   pop.appendChild(row);
@@ -520,13 +531,22 @@ export async function runProofreadCheck(view: EditorView, opts: ProofreadPluginO
   }
   showChip(view, sel.to, sel.text.length);
 
+  const lang = detectLang(sel.text);
+  statsSender?.track(opts.mode === "improve" ? "check_improve" : "check_fix", lang);
+
   try {
     const improved = await getImproved(opts, sel.text);
     const changes = diffToChanges(sel.text, improved);
-    const decos = changesToDecorations(view.state.doc, sel.segs, changes);
+    const decos = changesToDecorations(view.state.doc, sel.segs, changes, lang);
     view.dispatch(view.state.tr.setMeta(proofreadPluginKey, decos)); // replaces the pulse
-    if (changes.length === 0) flash(view, "No issues found ✓");
+    if (changes.length === 0) {
+      statsSender?.track("clean", lang);
+      flash(view, "No issues found ✓");
+    } else {
+      statsSender?.track("suggested", lang, changes.length);
+    }
   } catch (err) {
+    statsSender?.track("error", lang);
     view.dispatch(view.state.tr.setMeta(proofreadPluginKey, DecorationSet.empty)); // clear the pulse
     flash(view, err instanceof Error ? err.message : "Check failed");
   } finally {
@@ -584,9 +604,13 @@ export function proofreadPlugin(opts: ProofreadPluginOptions): Plugin {
     },
     view() {
       // No UI of its own — the trigger lives in the selection menu
-      // (`runProofreadCheck`). Just tidy up any open popover / chip on teardown.
+      // (`runProofreadCheck`). Counts outcomes, and tidies up any open popover /
+      // chip on teardown.
+      statsSender = shareTokenFromLocation() ? null : createStatsSender(opts.docId);
       return {
         destroy: () => {
+          statsSender?.dispose();
+          statsSender = null;
           closePopover();
           hideChip();
         },

@@ -7,4 +7,5 @@ import { route, type RouteConfigEntry } from "@react-router/dev/routes";
 // imports off the client bundle.
 export default [
   route("api/proofread/:id", "extensions/ai-proofreader/proofread.ts"),
+  route("api/proofread/:id/stats", "extensions/ai-proofreader/stats.ts"),
 ] satisfies RouteConfigEntry[];

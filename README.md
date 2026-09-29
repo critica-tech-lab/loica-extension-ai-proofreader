@@ -79,6 +79,22 @@ is faster but paraphrases more. Language is auto-detected per request.
 - Server-side Ollama tuning on limited hardware: `OLLAMA_FLASH_ATTENTION=1`,
   `OLLAMA_KV_CACHE_TYPE=q8_0`.
 
+## Outcome counters
+
+The editor counts how suggestions are used, to show whether they are worth their
+noise: `check_fix` / `check_improve` (a run started), `suggested` (underlines
+produced), `clean` (a run found nothing), `accepted`, `dismissed` and `error`.
+Only counts per day and language (`en`, `es`, `other`) are stored in `pr_stats`;
+there is no text and no user id. Anonymous share-link viewers are not counted.
+Share of suggestions that were applied, by language:
+
+```sql
+SELECT lang,
+       SUM(CASE WHEN event = 'accepted'  THEN count END) * 1.0 /
+       SUM(CASE WHEN event = 'suggested' THEN count END) AS acceptance
+FROM pr_stats GROUP BY lang;
+```
+
 ## Access control
 
 `POST /api/proofread/:id` fronts an Ollama instance that has **no authentication
