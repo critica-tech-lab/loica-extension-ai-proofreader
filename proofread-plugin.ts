@@ -57,11 +57,9 @@ interface Edit {
   lang: string | null;
 }
 
-// AI suggestions are ALWAYS violet, so the user can tell them apart at a glance:
-// red/amber wavy = LanguageTool (corrections), violet wavy = AI.
-function typeColor(_type: string): string {
-  return "#7b5cd6";
-}
+// AI suggestions are ALWAYS the Loica purple, drawn as a solid line over a
+// faint wash, so the user can tell them apart at a glance from LanguageTool's
+// dotted scarlet / tawny / blue lines.
 
 // ── selection serialisation + offset → PM position ──────────────────────────
 
@@ -212,15 +210,11 @@ function changesToDecorations(doc: PMNode, segs: Seg[], changes: Change[], lang:
       const from = Math.max(0, Math.min(rawFrom, max));
       const to = Math.max(0, Math.min(rawLast + 1, max));
       if (to <= from) continue;
-      const color = typeColor(c.type);
       decos.push(
         Decoration.inline(
           from,
           to,
-          {
-            class: "ai-proofread-issue",
-            style: `text-decoration: underline; text-decoration-color: ${color}; text-decoration-thickness: 1.5px; text-underline-offset: 2px; cursor: pointer;`,
-          },
+          { class: "ai-proofread-issue" },
           { aiEdit: { wrong: c.wrong, fix: c.fix, why: c.why, type: c.type, lang } },
         ),
       );
@@ -378,6 +372,20 @@ function injectStyles() {
   const s = document.createElement("style");
   s.textContent = `
 @keyframes ai-proofread-pulse { 0%,100% { background: color-mix(in srgb, #7b5cd6 8%, transparent); } 50% { background: color-mix(in srgb, #7b5cd6 26%, transparent); } }
+.ai-proofread-issue {
+  --ai-c: var(--color-purple, #5E409D);
+  text-decoration-line: underline;
+  text-decoration-style: solid;
+  text-decoration-color: var(--ai-c);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  text-decoration-skip-ink: none;
+  background-color: color-mix(in srgb, var(--ai-c) 10%, transparent);
+  border-radius: var(--radius-xs, 4px);
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+.ai-proofread-issue:hover { background-color: color-mix(in srgb, var(--ai-c) 22%, transparent); }
 .ai-proofread-pending { animation: ai-proofread-pulse 1.1s ease-in-out infinite; border-radius: 3px; }
 @keyframes ai-proofread-spin { to { transform: rotate(360deg); } }
 .ai-proofread-spinner { display:inline-block; width:11px; height:11px; border:2px solid currentColor; border-top-color: transparent; border-radius:50%; animation: ai-proofread-spin .7s linear infinite; }
