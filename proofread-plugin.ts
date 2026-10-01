@@ -248,51 +248,32 @@ function onDocMouseDown(e: MouseEvent) {
   if (activePopover && !activePopover.contains(e.target as Node)) closePopover();
 }
 
-function openPopover(view: EditorView, edit: Edit, from: number, to: number, x: number, y: number) {
+const ICON_DISMISS =
+  '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6.25"/><path d="M5.75 5.75l4.5 4.5M10.25 5.75l-4.5 4.5"/></svg>';
+
+/** Gap between the chip and the flagged text. */
+const CHIP_GAP_PX = 6;
+
+/**
+ * Compact suggestion chip, same look as LanguageTool's spelling chip:
+ *
+ *    ┌─────────────────┐
+ *    │ fix text   ⊗    │   click the text to apply, ⊗ to ignore
+ *    └─────────────────┘
+ *    wrong text
+ *
+ * The reason ("Clearer phrasing", ...) is a tooltip, not body copy.
+ */
+function openPopover(view: EditorView, edit: Edit, from: number, to: number, onIgnore: () => void) {
   closePopover();
   const pop = document.createElement("div");
-  Object.assign(pop.style, {
-    position: "fixed",
-    left: `${Math.min(x, window.innerWidth - 300)}px`,
-    top: `${y + 12}px`,
-    width: "min(300px, 92vw)",
-    background: "var(--bg, #fff)",
-    color: "var(--fg, #111)",
-    border: "1px solid var(--border, #ccc)",
-    borderRadius: "9px",
-    boxShadow: "0 6px 26px rgba(0,0,0,0.2)",
-    padding: "11px 13px",
-    zIndex: "2000",
-    fontSize: "13px",
-    lineHeight: "1.5",
-  } as CSSStyleDeclaration);
-
-  const cat = document.createElement("div");
-  cat.textContent = edit.type;
-  Object.assign(cat.style, {
-    fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.04em",
-    opacity: "0.55", marginBottom: "4px",
-  } as CSSStyleDeclaration);
-  pop.appendChild(cat);
-
-  if (edit.why) {
-    const why = document.createElement("div");
-    why.textContent = edit.why;
-    why.style.marginBottom = "8px";
-    pop.appendChild(why);
-  }
-
-  const row = document.createElement("div");
-  Object.assign(row.style, { display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" } as CSSStyleDeclaration);
+  pop.className = "ai-proofread-popover";
 
   const apply = document.createElement("button");
   apply.type = "button";
-  apply.textContent = edit.fix || "(delete)";
-  Object.assign(apply.style, {
-    padding: "3px 10px", borderRadius: "999px", border: "none",
-    background: "var(--fg, #111)", color: "var(--bg, #fff)",
-    fontSize: "12px", fontWeight: "600", cursor: "pointer",
-  } as CSSStyleDeclaration);
+  apply.className = "ai-proofread-main";
+  apply.textContent = edit.fix || "Remove";
+  apply.title = edit.why;
   apply.addEventListener("click", () => {
     try {
       const size = view.state.doc.content.size;
@@ -307,19 +288,26 @@ function openPopover(view: EditorView, edit: Edit, from: number, to: number, x: 
 
   const dismiss = document.createElement("button");
   dismiss.type = "button";
-  dismiss.textContent = "Dismiss";
-  Object.assign(dismiss.style, {
-    padding: "3px 10px", borderRadius: "999px", border: "1px solid var(--border, #ccc)",
-    background: "transparent", color: "var(--fg, #111)", fontSize: "12px", cursor: "pointer",
-  } as CSSStyleDeclaration);
+  dismiss.className = "ai-proofread-icon";
+  dismiss.title = "Ignore this suggestion";
+  dismiss.setAttribute("aria-label", "Ignore this suggestion");
+  dismiss.innerHTML = ICON_DISMISS;
   dismiss.addEventListener("click", () => {
     statsSender?.track("dismissed", edit.lang);
     closePopover();
+    onIgnore();
   });
 
-  row.append(apply, dismiss);
-  pop.appendChild(row);
+  pop.append(apply, dismiss);
   document.body.appendChild(pop);
+
+  // Sit above the text; flip below when there is no room at the top.
+  const coords = view.coordsAtPos(from);
+  const rect = pop.getBoundingClientRect();
+  const above = coords.top - rect.height - CHIP_GAP_PX;
+  pop.style.top = `${above >= 0 ? above : coords.bottom + CHIP_GAP_PX}px`;
+  pop.style.left = `${Math.max(8, Math.min(coords.left, window.innerWidth - rect.width - 8))}px`;
+
   activePopover = pop;
   document.addEventListener("mousedown", onDocMouseDown, true);
   document.addEventListener("scroll", closePopover, true);
@@ -386,6 +374,22 @@ function injectStyles() {
   transition: background-color 120ms ease;
 }
 .ai-proofread-issue:hover { background-color: color-mix(in srgb, var(--ai-c) 22%, transparent); }
+.ai-proofread-popover {
+  position: fixed; z-index: 2000; display: flex; align-items: center; gap: 2px; padding: 3px;
+  max-width: min(360px, 92vw); font-size: 13px;
+  background: var(--bg, #fff); color: var(--fg, #111);
+  border: 1px solid var(--border, #ccc); border-radius: 10px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.14);
+}
+.ai-proofread-popover button {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 26px; min-width: 26px; padding: 0 6px; border: none; border-radius: 7px;
+  background: none; color: inherit; font: inherit; cursor: pointer;
+}
+.ai-proofread-popover button:hover { background: color-mix(in srgb, var(--fg, #111) 8%, transparent); }
+.ai-proofread-popover .ai-proofread-main { padding: 3px 8px; font-weight: 500; text-align: left; }
+.ai-proofread-popover .ai-proofread-icon { flex: none; opacity: 0.6; }
+.ai-proofread-popover .ai-proofread-icon:hover { opacity: 1; }
 .ai-proofread-pending { animation: ai-proofread-pulse 1.1s ease-in-out infinite; border-radius: 3px; }
 @keyframes ai-proofread-spin { to { transform: rotate(360deg); } }
 .ai-proofread-spinner { display:inline-block; width:11px; height:11px; border:2px solid currentColor; border-top-color: transparent; border-radius:50%; animation: ai-proofread-spin .7s linear infinite; }
@@ -588,6 +592,33 @@ export interface ProofreadPluginOptions {
   mode?: Mode;
 }
 
+/**
+ * Remove suggestions whose text the transaction rewrote. `map` alone keeps a
+ * decoration over text that replaced its range, so an accepted fix stayed
+ * underlined. Touching an edit's edge doesn't count, only real overlap.
+ *
+ *   "aa [bad] cc"  --replace bad->good-->  "aa good cc"   underline gone
+ *   "aa [bad] cc"  --replace "aa "------>  "xx [bad] cc"  underline kept
+ */
+function dropEdited(set: DecorationSet, tr: Transaction): DecorationSet {
+  if (!tr.docChanged) {
+    return set;
+  }
+
+  let result = set;
+  tr.mapping.maps.forEach((map, i) => {
+    const after = tr.mapping.slice(i + 1);
+    map.forEach((_oldStart, _oldEnd, newStart, newEnd) => {
+      const from = after.map(newStart, -1);
+      const to = after.map(newEnd, 1);
+      const edited = result.find(from, to).filter((d) => d.from < to && d.to > from);
+      result = result.remove(edited);
+    });
+  });
+
+  return result;
+}
+
 export function proofreadPlugin(opts: ProofreadPluginOptions): Plugin {
   return new Plugin<DecorationSet>({
     key: proofreadPluginKey,
@@ -597,7 +628,7 @@ export function proofreadPlugin(opts: ProofreadPluginOptions): Plugin {
         try {
           const meta = tr.getMeta(proofreadPluginKey) as DecorationSet | undefined;
           if (meta) return meta;
-          return old.map(tr.mapping, tr.doc);
+          return dropEdited(old.map(tr.mapping, tr.doc), tr);
         } catch {
           return DecorationSet.empty;
         }
@@ -619,7 +650,10 @@ export function proofreadPlugin(opts: ProofreadPluginOptions): Plugin {
           // in the spec at creation time — otherwise doc edits between check and
           // apply leave the range stale, so the fix is inserted without deleting
           // the wrong span (they overlap).
-          openPopover(view, spec.aiEdit, hit.from, hit.to, event.clientX, event.clientY);
+          const onIgnore = () => {
+            view.dispatch(view.state.tr.setMeta(proofreadPluginKey, set.remove([hit])));
+          };
+          openPopover(view, spec.aiEdit, hit.from, hit.to, onIgnore);
           return true;
         } catch {
           return false;

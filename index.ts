@@ -27,13 +27,8 @@ const aiProofreaderExtension: LoicaExtension = {
   ],
   // Triggers live in loica's native text-selection menu (not a floating button):
   // an in-place line edit rendered as discrete inline underlines.
-  // "Check" only corrects errors; "Improve" also tightens phrasing (rewrites).
+  // Only "Improve": a grammar-only "Check" overlapped LanguageTool.
   selectionMenuItems: (ctx: ExtensionEditorPluginContext) => [
-    {
-      label: "Check",
-      title: "Fix grammar errors only (spelling is left to LanguageTool)",
-      run: (view) => runProofreadCheck(view as EditorView, { docId: ctx.docId, mode: "fix" }),
-    },
     {
       label: "Improve",
       title: "Fix errors and tighten wordy phrasing",
