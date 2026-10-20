@@ -1,17 +1,16 @@
 # loica-extension-ai-proofreader
 
 An **on-demand AI proofreader** for Loica. To the user it's just a spell/grammar
-checker — no "AI" branding. Select a passage → **Check** or **Improve** (in
-Loica's native text-selection menu) → the fixes appear as **inline underlines**;
-click one to apply.
+checker — no "AI" branding. Select a passage → **Improve** (in Loica's native
+text-selection menu) → the fixes appear as **inline underlines**; click one to
+apply.
 
-- **Check** fixes grammar errors only (agreement, verb form, prepositions,
-  punctuation) and leaves other words alone. It does not touch spelling or
-  accents: the LanguageTool extension underlines those as you type. If you run
-  Check without LanguageTool, typos stay unfixed.
-- **Improve** also tightens wordy/redundant/weak phrasing, in place. It rewrites
-  text, so it is a separate action: on a benchmark of correct sentences it
-  changed 42 to 51% of them, against 0 to 2% for Check.
+**Improve** fixes errors and tightens wordy/redundant/weak phrasing, in place.
+It rewrites text: on a benchmark of correct sentences it changed 42 to 51% of
+them. An earlier grammar-only **Check** action was removed because it overlapped
+LanguageTool, which underlines spelling and grammar as you type. The route
+still accepts `mode: "fix"` for that minimal pass, but the editor no longer
+offers it.
 
 **Read-until-accepted** — the document only changes when you click a suggestion.
 
@@ -22,7 +21,7 @@ lever for Spanish.
 
 ## How it works
 
-1. **Trigger** — "Check" or "Improve" in the selection menu runs on the selection (never on
+1. **Trigger** — "Improve" in the selection menu runs on the selection (never on
    keystroke; the LLM is too slow/expensive for that).
 2. **Pending state** — the selection collapses and the passage gets a pulsing
    highlight + a spinner chip for the whole request, so the user sees which
@@ -50,15 +49,15 @@ Uses only generic extension seams — core names no extension:
 - **Discovery** — `export default` in `index.ts` / `index.server.ts` / `routes.ts`;
   the host globs `app/extensions/<name>/*` and registers it. *(seam: PR #89)*
 - **`editorPlugins`** — renders the underlines + popover in the editor. *(PR #89)*
-- **`selectionMenuItems`** — the "Check" action in the native selection bubble. *(PR #90)*
+- **`selectionMenuItems`** — the "Improve" action in the native selection bubble. *(PR #90)*
 
 ## Config (env, on the loica server)
 
 | Var | Default | Meaning |
 |-----|---------|---------|
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama base URL |
-| `OLLAMA_PROOFREAD_MODEL` | `gemma3:12b` | model tag (Check and Improve) |
-| `OLLAMA_IMPROVE_MODEL` | same as above | model tag for Improve only |
+| `OLLAMA_PROOFREAD_MODEL` | `gemma3:12b` | model tag for every mode |
+| `OLLAMA_IMPROVE_MODEL` | same as above | overrides the model for Improve |
 | `OLLAMA_KEEP_ALIVE` | `30m` | how long Ollama keeps the model resident |
 | `OLLAMA_TIMEOUT_MS` | `120000` | give up on a request after this long (Ollama queues with no timeout) |
 | `OLLAMA_MAX_CONCURRENT` | `2` | Loica requests sent to Ollama at once |
@@ -84,7 +83,8 @@ is faster but paraphrases more. Language is auto-detected per request.
 ## Outcome counters
 
 The editor counts how suggestions are used, to show whether they are worth their
-noise: `check_fix` / `check_improve` (a run started), `suggested` (underlines
+noise: `check_improve` (a run started; `check_fix` is only counted for the
+API's `fix` mode, which the editor no longer offers), `suggested` (underlines
 produced), `clean` (a run found nothing), `accepted`, `dismissed` and `error`.
 Only counts per day and language (`en`, `es`, `other`) are stored in `pr_stats`;
 there is no text and no user id. Anonymous share-link viewers are not counted.
@@ -103,8 +103,8 @@ FROM pr_stats GROUP BY lang;
 of its own**, so this route is the only thing between a caller and your GPU. It
 grants access to exactly three cases:
 
-1. A session user who is a member of the document's workspace.
-2. A session user with folder-share access.
+1. A session user who is a member of the document's workspace (or a site admin).
+2. A session user the document, or a folder above it, is shared with.
 3. A caller who **presents a valid share token for that same document** — the
    `shareToken` body field, resolved through `getDocumentByToken`, which also
    enforces `share_expires_at`. Password-protected shares additionally require
@@ -192,14 +192,13 @@ autossh -M 0 -N \
 - **Host must not sleep** and should **auto-login** (so the launchd agent starts
   after a reboot); otherwise the tunnel won't come back up unattended.
 
-An example macOS `launchd` plist for this lives under the repo's install notes.
-
 Verify from the loica server: `curl http://localhost:11434/api/tags`.
 
 ## Install
 
-Requires a loica build with the generic seams (auto-discovery + `editorPlugins`
-+ `selectionMenuItems`). No loica core edits.
+Requires a loica build with the generic seams (auto-discovery, `editorPlugins`,
+`selectionMenuItems`) and `getUserDocAccess` from `~/lib/doc-access.server`
+(loica #136 or later). No loica core edits.
 
 Installed as a git submodule, so the extension lives physically under `app/` and
 its `routes.ts` points straight at `proofread.ts` — no symlink, no route shim:
